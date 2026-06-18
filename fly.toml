@@ -1,0 +1,31 @@
+# Fly.io config for the HPD booking backend (NestJS + PostgreSQL).
+# `app` must be globally unique on Fly — `fly launch` will adjust it if taken.
+app = "hpd-booking-backend"
+# Pick a region near your users. fra = Frankfurt, cdg = Paris, mad = Madrid.
+# Run `fly platform regions` to see the full list.
+primary_region = "fra"
+
+[build]
+
+[env]
+  # The app reads PORT from env (main.ts). Keep this in sync with internal_port.
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Scale to zero when idle to keep costs minimal; wakes on the next request.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# To persist uploaded receipt files across deploys/restarts, create a volume
+#   fly volumes create uploads --size 1 --region fra
+# then uncomment the mount below and redeploy:
+# [[mounts]]
+#   source = "uploads"
+#   destination = "/app/uploads"
