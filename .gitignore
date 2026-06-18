@@ -1,0 +1,17 @@
+# compiled output
+/dist
+/node_modules
+
+# logs
+*.log
+npm-debug.log*
+
+# environment
+.env
+
+# uploads (keep the folder, ignore the contents)
+/uploads/*
+!/uploads/.gitkeep
+
+# OS / editor
+.DS_Store

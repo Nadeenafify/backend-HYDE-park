@@ -1,0 +1,72 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { BookingsService } from './bookings.service';
+import { CreateBookingDto } from './dto/create-booking.dto';
+import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
+import { BookingStatus } from './entities/booking.entity';
+import { receiptMulterOptions } from './multer.config';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+
+@Controller('bookings')
+export class BookingsController {
+  constructor(private readonly bookingsService: BookingsService) {}
+
+  /**
+   * POST /api/bookings
+   * Accepts multipart/form-data with the booking fields plus a `receipt` file.
+   */
+  @Post()
+  @UseInterceptors(FileInterceptor('receipt', receiptMulterOptions))
+  create(
+    @Body() dto: CreateBookingDto,
+    @UploadedFile() receipt?: Express.Multer.File,
+  ) {
+    return this.bookingsService.create(dto, receipt);
+  }
+
+  /** GET /api/bookings?status=pending — admin only (contains customer PII). */
+  @Get()
+  @UseGuards(JwtAuthGuard)
+  findAll(@Query('status') status?: BookingStatus) {
+    return this.bookingsService.findAll(status);
+  }
+
+  /** GET /api/bookings/:id — admin only. */
+  @Get(':id')
+  @UseGuards(JwtAuthGuard)
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.bookingsService.findOne(id);
+  }
+
+  /** PATCH /api/bookings/:id/status — admin only. */
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard)
+  updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBookingStatusDto,
+  ) {
+    return this.bookingsService.updateStatus(id, dto.status);
+  }
+
+  /** DELETE /api/bookings/:id — admin only. */
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(204)
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.bookingsService.remove(id);
+  }
+}
