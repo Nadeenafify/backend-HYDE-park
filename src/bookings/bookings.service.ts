@@ -28,6 +28,14 @@ export class BookingsService {
       throw new BadRequestException('You must agree to the terms of service');
     }
 
+    // Friday (5) and Saturday (6) are official holidays in Egypt — closed.
+    const weekday = new Date(`${dto.installationDate}T00:00:00Z`).getUTCDay();
+    if (weekday === 5 || weekday === 6) {
+      throw new BadRequestException(
+        'Installations are not available on Fridays or Saturdays (official holidays).',
+      );
+    }
+
     const unitExists = await this.unitsService.existsActive(dto.unitCode);
     if (!unitExists) {
       throw new BadRequestException(`Unknown unit "${dto.unitCode}"`);
