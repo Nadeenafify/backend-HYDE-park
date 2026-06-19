@@ -49,6 +49,54 @@ export class UnitsService implements OnModuleInit {
     return this.unitsRepo.save(unit);
   }
 
+  /**
+   * Bulk-import units (e.g. from an Excel upload). Trims and de-duplicates the
+   * incoming rows, skips any code that already exists, and inserts the rest.
+   */
+  async createMany(
+    rows: { code: string; description?: string | null }[],
+  ): Promise<{ created: number; skipped: number; total: number }> {
+    const total = rows.length;
+
+    // Normalize + dedupe within the uploaded file.
+    const seen = new Set<string>();
+    const cleaned: { code: string; description: string | null }[] = [];
+    for (const r of rows) {
+      const code = String(r.code ?? '').trim();
+      if (!code) continue;
+      const key = code.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const description = (r.description ?? '').toString().trim();
+      cleaned.push({ code, description: description || null });
+    }
+
+    // Skip codes that already exist in the table.
+    const existing = await this.unitsRepo.find({ select: { code: true } });
+    const existingSet = new Set(existing.map((e) => e.code.toLowerCase()));
+    const toInsert = cleaned.filter(
+      (c) => !existingSet.has(c.code.toLowerCase()),
+    );
+
+    if (toInsert.length) {
+      await this.unitsRepo.save(
+        toInsert.map((c) =>
+          this.unitsRepo.create({
+            code: c.code,
+            description: c.description,
+            isActive: true,
+          }),
+        ),
+      );
+    }
+
+    return {
+      created: toInsert.length,
+      skipped: total - toInsert.length,
+      total,
+    };
+  }
+
   /** True if a unit with the given code exists and is active. */
   async existsActive(code: string): Promise<boolean> {
     const count = await this.unitsRepo.count({
