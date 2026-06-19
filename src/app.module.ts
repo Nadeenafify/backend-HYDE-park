@@ -7,6 +7,7 @@ import { buildTypeOrmOptions } from './config/database.config';
 import { AuthModule } from './auth/auth.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { UnitsModule } from './units/units.module';
+import { BackupModule } from './backup/backup.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -22,6 +23,7 @@ import { HealthController } from './health/health.controller';
     AuthModule,
     UnitsModule,
     BookingsModule,
+    BackupModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
