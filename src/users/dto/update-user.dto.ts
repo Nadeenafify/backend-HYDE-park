@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsEmail,
   IsEnum,
   IsOptional,
   IsString,
@@ -13,6 +14,10 @@ export class UpdateUserDto {
   @IsString()
   @Length(1, 120)
   name?: string;
+
+  @IsOptional()
+  @IsEmail({}, { message: 'A valid email is required' })
+  email?: string;
 
   @IsOptional()
   @IsEnum(UserRole, { message: 'role must be super_admin, manager or viewer' })

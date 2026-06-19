@@ -77,11 +77,27 @@ export class UsersService implements OnModuleInit {
   async update(id: string, dto: UpdateUserDto): Promise<User> {
     const user = await this.findById(id);
     if (!user) throw new NotFoundException('User not found');
+    if (dto.email !== undefined) {
+      const email = dto.email.trim().toLowerCase();
+      if (email !== user.email) {
+        const existing = await this.findByEmail(email);
+        if (existing && existing.id !== id) {
+          throw new ConflictException('A user with this email already exists');
+        }
+        user.email = email;
+      }
+    }
     if (dto.name !== undefined) user.name = dto.name.trim();
     if (dto.role !== undefined) user.role = dto.role;
     if (dto.isActive !== undefined) user.isActive = dto.isActive;
     if (dto.password) user.passwordHash = await bcrypt.hash(dto.password, 10);
     return this.repo.save(user);
+  }
+
+  async remove(id: string): Promise<void> {
+    const user = await this.findById(id);
+    if (!user) throw new NotFoundException('User not found');
+    await this.repo.remove(user);
   }
 
   /** Strip the password hash before returning a user to a client. */

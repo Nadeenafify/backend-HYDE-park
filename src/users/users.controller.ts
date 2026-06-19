@@ -1,13 +1,18 @@
 import {
   Body,
   Controller,
+  Delete,
+  ForbiddenException,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -39,5 +44,17 @@ export class UsersController {
     @Body() dto: UpdateUserDto,
   ) {
     return this.users.toSafe(await this.users.update(id, dto));
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request & { user?: { sub?: string } },
+  ) {
+    if (req.user?.sub === id) {
+      throw new ForbiddenException('You cannot delete your own account');
+    }
+    await this.users.remove(id);
   }
 }
