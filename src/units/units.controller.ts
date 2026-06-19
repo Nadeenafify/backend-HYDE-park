@@ -5,11 +5,16 @@ import { BulkCreateUnitsDto } from './dto/bulk-create-units.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { CurrentUser, JwtUser } from '../auth/current-user.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { ActivityLogService } from '../activity/activity-log.service';
 
 @Controller('units')
 export class UnitsController {
-  constructor(private readonly unitsService: UnitsService) {}
+  constructor(
+    private readonly unitsService: UnitsService,
+    private readonly logs: ActivityLogService,
+  ) {}
 
   /** GET /api/units — public: the booking form needs the active unit list. */
   @Get()
@@ -21,15 +26,27 @@ export class UnitsController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  create(@Body() dto: CreateUnitDto) {
-    return this.unitsService.create(dto);
+  async create(@Body() dto: CreateUnitDto, @CurrentUser() user: JwtUser) {
+    const unit = await this.unitsService.create(dto);
+    await this.logs.record({
+      user,
+      action: 'unit.create',
+      description: `Added unit ${unit.code}`,
+    });
+    return unit;
   }
 
   /** POST /api/units/bulk — super admin only: import many units (Excel). */
   @Post('bulk')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  createMany(@Body() dto: BulkCreateUnitsDto) {
-    return this.unitsService.createMany(dto.units);
+  async createMany(@Body() dto: BulkCreateUnitsDto, @CurrentUser() user: JwtUser) {
+    const result = await this.unitsService.createMany(dto.units);
+    await this.logs.record({
+      user,
+      action: 'unit.import',
+      description: `Imported ${result.created} units (skipped ${result.skipped})`,
+    });
+    return result;
   }
 }

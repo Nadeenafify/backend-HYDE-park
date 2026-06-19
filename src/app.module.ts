@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { UnitsModule } from './units/units.module';
 import { BackupModule } from './backup/backup.module';
+import { ActivityLogModule } from './activity/activity-log.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -26,6 +27,7 @@ import { HealthController } from './health/health.controller';
     UnitsModule,
     BookingsModule,
     BackupModule,
+    ActivityLogModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

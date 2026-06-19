@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { SafeUser } from '../users/entities/user.entity';
+import { ActivityLogService } from '../activity/activity-log.service';
 import { LoginDto } from './dto/login.dto';
 
 /**
@@ -14,6 +15,7 @@ export class AuthService {
   constructor(
     private readonly users: UsersService,
     private readonly jwt: JwtService,
+    private readonly logs: ActivityLogService,
   ) {}
 
   async login(dto: LoginDto): Promise<{ token: string; user: SafeUser }> {
@@ -31,6 +33,11 @@ export class AuthService {
       email: user.email,
       name: user.name,
       role: user.role,
+    });
+    await this.logs.record({
+      user: { sub: user.id, name: user.name, email: user.email },
+      action: 'auth.login',
+      description: `${user.name} signed in`,
     });
     return { token, user: this.users.toSafe(user) };
   }

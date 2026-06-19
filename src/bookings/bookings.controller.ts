@@ -23,11 +23,16 @@ import { receiptMulterOptions } from './multer.config';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { CurrentUser, JwtUser } from '../auth/current-user.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { ActivityLogService } from '../activity/activity-log.service';
 
 @Controller('bookings')
 export class BookingsController {
-  constructor(private readonly bookingsService: BookingsService) {}
+  constructor(
+    private readonly bookingsService: BookingsService,
+    private readonly logs: ActivityLogService,
+  ) {}
 
   /**
    * POST /api/bookings
@@ -70,22 +75,36 @@ export class BookingsController {
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.SUPER_ADMIN)
-  updateStatus(
+  async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateBookingStatusDto,
+    @CurrentUser() user: JwtUser,
   ) {
-    return this.bookingsService.updateStatus(id, dto.status);
+    const booking = await this.bookingsService.updateStatus(id, dto.status);
+    await this.logs.record({
+      user,
+      action: 'booking.status',
+      description: `Set booking #${id.slice(0, 8).toUpperCase()} to ${dto.status}`,
+    });
+    return booking;
   }
 
   /** PATCH /api/bookings/:id/postpone — manager or super admin. */
   @Patch(':id/postpone')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.SUPER_ADMIN)
-  postpone(
+  async postpone(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PostponeBookingDto,
+    @CurrentUser() user: JwtUser,
   ) {
-    return this.bookingsService.postpone(id, dto);
+    const booking = await this.bookingsService.postpone(id, dto);
+    await this.logs.record({
+      user,
+      action: 'booking.postpone',
+      description: `Postponed booking #${id.slice(0, 8).toUpperCase()} to ${dto.installationDate} ${dto.installationTime}`,
+    });
+    return booking;
   }
 
   /** DELETE /api/bookings/:id — super admin only. */
@@ -93,7 +112,15 @@ export class BookingsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   @HttpCode(204)
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.bookingsService.remove(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    await this.bookingsService.remove(id);
+    await this.logs.record({
+      user,
+      action: 'booking.delete',
+      description: `Deleted booking #${id.slice(0, 8).toUpperCase()}`,
+    });
   }
 }
