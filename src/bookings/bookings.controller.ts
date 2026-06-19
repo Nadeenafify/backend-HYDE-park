@@ -45,6 +45,16 @@ export class BookingsController {
     return this.bookingsService.findAll(status);
   }
 
+  /**
+   * GET /api/bookings/availability — public. Lists the installation slots
+   * (date + time) that are already taken, so the booking form can disable them.
+   * Declared before the ":id" route so it isn't captured as an id param.
+   */
+  @Get('availability')
+  availability() {
+    return this.bookingsService.getTakenSlots();
+  }
+
   /** GET /api/bookings/:id — admin only. */
   @Get(':id')
   @UseGuards(JwtAuthGuard)
