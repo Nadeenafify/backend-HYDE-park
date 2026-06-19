@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { buildTypeOrmOptions } from './config/database.config';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { UnitsModule } from './units/units.module';
 import { BackupModule } from './backup/backup.module';
@@ -21,6 +22,7 @@ import { HealthController } from './health/health.controller';
       useFactory: buildTypeOrmOptions,
     }),
     AuthModule,
+    UsersModule,
     UnitsModule,
     BookingsModule,
     BackupModule,

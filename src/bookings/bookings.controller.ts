@@ -21,6 +21,9 @@ import { PostponeBookingDto } from './dto/postpone-booking.dto';
 import { BookingStatus } from './entities/booking.entity';
 import { receiptMulterOptions } from './multer.config';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../users/entities/user.entity';
 
 @Controller('bookings')
 export class BookingsController {
@@ -63,9 +66,10 @@ export class BookingsController {
     return this.bookingsService.findOne(id);
   }
 
-  /** PATCH /api/bookings/:id/status — admin only. */
+  /** PATCH /api/bookings/:id/status — manager or super admin. */
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.MANAGER, UserRole.SUPER_ADMIN)
   updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateBookingStatusDto,
@@ -73,9 +77,10 @@ export class BookingsController {
     return this.bookingsService.updateStatus(id, dto.status);
   }
 
-  /** PATCH /api/bookings/:id/postpone — admin only. Reschedule to a new slot. */
+  /** PATCH /api/bookings/:id/postpone — manager or super admin. */
   @Patch(':id/postpone')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.MANAGER, UserRole.SUPER_ADMIN)
   postpone(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PostponeBookingDto,
@@ -83,9 +88,10 @@ export class BookingsController {
     return this.bookingsService.postpone(id, dto);
   }
 
-  /** DELETE /api/bookings/:id — admin only. */
+  /** DELETE /api/bookings/:id — super admin only. */
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   @HttpCode(204)
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.bookingsService.remove(id);
