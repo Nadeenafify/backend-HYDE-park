@@ -8,8 +8,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThanOrEqual, Not, Repository } from 'typeorm';
-import { Booking, BookingStatus } from './entities/booking.entity';
+import {
+  Booking,
+  BookingStatus,
+  PostponeRecord,
+} from './entities/booking.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { PostponeBookingDto } from './dto/postpone-booking.dto';
 import { UnitsService } from '../units/units.service';
 
 // Fixed-date Egyptian national holidays (recur yearly), as "MM-DD".
@@ -39,20 +44,8 @@ export class BookingsService {
       throw new BadRequestException('You must agree to the terms of service');
     }
 
-    // Friday (5) and Saturday (6) are the weekend in Egypt — closed.
-    const weekday = new Date(`${dto.installationDate}T00:00:00Z`).getUTCDay();
-    if (weekday === 5 || weekday === 6) {
-      throw new BadRequestException(
-        'Installations are not available on Fridays or Saturdays (official holidays).',
-      );
-    }
-
-    // Fixed-date national holidays are also closed.
-    if (FIXED_HOLIDAYS.has(dto.installationDate.slice(5))) {
-      throw new BadRequestException(
-        'Installations are not available on official public holidays.',
-      );
-    }
+    // Closed on weekends / national holidays.
+    this.assertBookableDate(dto.installationDate);
 
     const unitExists = await this.unitsService.existsActive(dto.unitCode);
     if (!unitExists) {
@@ -61,18 +54,7 @@ export class BookingsService {
 
     // Each installation slot (date + time) can be booked only once. A cancelled
     // booking frees the slot again.
-    const slotTaken = await this.bookingsRepo.findOne({
-      where: {
-        installationDate: dto.installationDate,
-        installationTime: dto.installationTime,
-        status: Not(BookingStatus.CANCELLED),
-      },
-    });
-    if (slotTaken) {
-      throw new ConflictException(
-        'This installation date and time is already booked. Please choose another slot.',
-      );
-    }
+    await this.assertSlotFree(dto.installationDate, dto.installationTime);
 
     const booking = this.bookingsRepo.create({
       unitCode: dto.unitCode,
@@ -87,6 +69,87 @@ export class BookingsService {
       receiptOriginalName: receipt?.originalname ?? null,
       receiptPath: receipt ? `/uploads/${receipt.filename}` : null,
     });
+
+    return this.bookingsRepo.save(booking);
+  }
+
+  /** Reject weekend (Fri/Sat) and fixed national-holiday dates. */
+  private assertBookableDate(installationDate: string): void {
+    const weekday = new Date(`${installationDate}T00:00:00Z`).getUTCDay();
+    if (weekday === 5 || weekday === 6) {
+      throw new BadRequestException(
+        'Installations are not available on Fridays or Saturdays (official holidays).',
+      );
+    }
+    if (FIXED_HOLIDAYS.has(installationDate.slice(5))) {
+      throw new BadRequestException(
+        'Installations are not available on official public holidays.',
+      );
+    }
+  }
+
+  /** Reject a slot already taken by another (non-cancelled) booking. */
+  private async assertSlotFree(
+    installationDate: string,
+    installationTime: string,
+    excludeId?: string,
+  ): Promise<void> {
+    const existing = await this.bookingsRepo.findOne({
+      where: {
+        installationDate,
+        installationTime,
+        status: Not(BookingStatus.CANCELLED),
+      },
+    });
+    if (existing && existing.id !== excludeId) {
+      throw new ConflictException(
+        'This installation date and time is already booked. Please choose another slot.',
+      );
+    }
+  }
+
+  /**
+   * Postpone a booking to a new date/time: validates the new slot, frees the
+   * old one, records the move, and flags the booking as postponed.
+   */
+  async postpone(id: string, dto: PostponeBookingDto): Promise<Booking> {
+    const booking = await this.findOne(id);
+
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw new BadRequestException('Cannot postpone a cancelled booking.');
+    }
+    if (
+      booking.installationDate === dto.installationDate &&
+      booking.installationTime === dto.installationTime
+    ) {
+      throw new BadRequestException('Pick a different date or time to postpone.');
+    }
+
+    this.assertBookableDate(dto.installationDate);
+    await this.assertSlotFree(
+      dto.installationDate,
+      dto.installationTime,
+      booking.id,
+    );
+
+    const record: PostponeRecord = {
+      fromDate: booking.installationDate,
+      fromTime: booking.installationTime,
+      toDate: dto.installationDate,
+      toTime: dto.installationTime,
+      at: new Date().toISOString(),
+    };
+
+    // Capture the very first date on the first postpone.
+    if (!booking.postponeCount || !booking.originalDate) {
+      booking.originalDate = booking.installationDate;
+      booking.originalTime = booking.installationTime;
+    }
+    booking.postponeHistory = [...(booking.postponeHistory ?? []), record];
+    booking.postponeCount = (booking.postponeCount ?? 0) + 1;
+    booking.postponedAt = new Date();
+    booking.installationDate = dto.installationDate;
+    booking.installationTime = dto.installationTime;
 
     return this.bookingsRepo.save(booking);
   }

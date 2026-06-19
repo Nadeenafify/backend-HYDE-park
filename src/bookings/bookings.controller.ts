@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
+import { PostponeBookingDto } from './dto/postpone-booking.dto';
 import { BookingStatus } from './entities/booking.entity';
 import { receiptMulterOptions } from './multer.config';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -70,6 +71,16 @@ export class BookingsController {
     @Body() dto: UpdateBookingStatusDto,
   ) {
     return this.bookingsService.updateStatus(id, dto.status);
+  }
+
+  /** PATCH /api/bookings/:id/postpone — admin only. Reschedule to a new slot. */
+  @Patch(':id/postpone')
+  @UseGuards(JwtAuthGuard)
+  postpone(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PostponeBookingDto,
+  ) {
+    return this.bookingsService.postpone(id, dto);
   }
 
   /** DELETE /api/bookings/:id — admin only. */

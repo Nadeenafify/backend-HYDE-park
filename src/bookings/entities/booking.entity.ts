@@ -13,6 +13,15 @@ export enum BookingStatus {
   CANCELLED = 'cancelled',
 }
 
+/** One entry in a booking's postpone history. */
+export interface PostponeRecord {
+  fromDate: string;
+  fromTime: string;
+  toDate: string;
+  toTime: string;
+  at: string;
+}
+
 @Entity({ name: 'bookings' })
 export class Booking {
   @PrimaryGeneratedColumn('uuid')
@@ -61,6 +70,24 @@ export class Booking {
     default: BookingStatus.PENDING,
   })
   status: BookingStatus;
+
+  /** Installation date/time before the first postpone (null if never moved). */
+  @Column({ type: 'date', nullable: true })
+  originalDate: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  originalTime: string | null;
+
+  /** How many times this booking has been postponed. */
+  @Column({ type: 'int', default: 0 })
+  postponeCount: number;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  postponedAt: Date | null;
+
+  /** Full postpone history (from/to date+time, when). */
+  @Column({ type: 'jsonb', nullable: true })
+  postponeHistory: PostponeRecord[] | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
