@@ -12,6 +12,17 @@ import { Booking, BookingStatus } from './entities/booking.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UnitsService } from '../units/units.service';
 
+// Fixed-date Egyptian national holidays (recur yearly), as "MM-DD".
+const FIXED_HOLIDAYS = new Set([
+  '01-07', // عيد الميلاد المجيد
+  '01-25', // عيد الشرطة وثورة 25 يناير
+  '04-25', // عيد تحرير سيناء
+  '05-01', // عيد العمال
+  '06-30', // ذكرى ثورة 30 يونيو
+  '07-23', // عيد ثورة 23 يوليو
+  '10-06', // عيد القوات المسلحة
+]);
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -28,11 +39,18 @@ export class BookingsService {
       throw new BadRequestException('You must agree to the terms of service');
     }
 
-    // Friday (5) and Saturday (6) are official holidays in Egypt — closed.
+    // Friday (5) and Saturday (6) are the weekend in Egypt — closed.
     const weekday = new Date(`${dto.installationDate}T00:00:00Z`).getUTCDay();
     if (weekday === 5 || weekday === 6) {
       throw new BadRequestException(
         'Installations are not available on Fridays or Saturdays (official holidays).',
+      );
+    }
+
+    // Fixed-date national holidays are also closed.
+    if (FIXED_HOLIDAYS.has(dto.installationDate.slice(5))) {
+      throw new BadRequestException(
+        'Installations are not available on official public holidays.',
       );
     }
 
