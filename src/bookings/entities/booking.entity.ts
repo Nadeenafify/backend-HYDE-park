@@ -72,6 +72,15 @@ export class Booking {
   })
   status: BookingStatus;
 
+  /**
+   * When true, this customer's mobile number is barred from self-service
+   * online booking — they must call customer service. Set/cleared by an admin
+   * and applied to every booking sharing the same mobile. Independent of
+   * `status`: cancelling a booking does NOT block the customer.
+   */
+  @Column({ type: 'boolean', default: false })
+  blocked: boolean;
+
   /** Installation date/time before the first postpone (null if never moved). */
   @Column({ type: 'date', nullable: true })
   originalDate: string | null;

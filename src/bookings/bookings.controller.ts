@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
+import { UpdateBlockedDto } from './dto/update-blocked.dto';
 import { PostponeBookingDto } from './dto/postpone-booking.dto';
 import { BookingStatus } from './entities/booking.entity';
 import { receiptMulterOptions } from './multer.config';
@@ -85,6 +86,24 @@ export class BookingsController {
       user,
       action: 'booking.status',
       description: `Set booking #${id.slice(0, 8).toUpperCase()} to ${dto.status}`,
+    });
+    return booking;
+  }
+
+  /** PATCH /api/bookings/:id/blocked — block/unblock a customer from booking online. */
+  @Patch(':id/blocked')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.MANAGER, UserRole.SUPER_ADMIN)
+  async setBlocked(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBlockedDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    const booking = await this.bookingsService.setBlocked(id, dto.blocked);
+    await this.logs.record({
+      user,
+      action: 'booking.blocked',
+      description: `${dto.blocked ? 'Blocked' : 'Unblocked'} customer ${booking.mobile} (booking #${id.slice(0, 8).toUpperCase()})`,
     });
     return booking;
   }

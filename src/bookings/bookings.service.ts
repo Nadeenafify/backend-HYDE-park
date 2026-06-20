@@ -3,6 +3,7 @@ import { join } from 'path';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -16,17 +17,7 @@ import {
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { PostponeBookingDto } from './dto/postpone-booking.dto';
 import { UnitsService } from '../units/units.service';
-
-// Fixed-date Egyptian national holidays (recur yearly), as "MM-DD".
-const FIXED_HOLIDAYS = new Set([
-  '01-07', // عيد الميلاد المجيد
-  '01-25', // عيد الشرطة وثورة 25 يناير
-  '04-25', // عيد تحرير سيناء
-  '05-01', // عيد العمال
-  '06-30', // ذكرى ثورة 30 يونيو
-  '07-23', // عيد ثورة 23 يوليو
-  '10-06', // عيد القوات المسلحة
-]);
+import { ClosedDaysService } from '../closed-days/closed-days.service';
 
 @Injectable()
 export class BookingsService {
@@ -34,6 +25,7 @@ export class BookingsService {
     @InjectRepository(Booking)
     private readonly bookingsRepo: Repository<Booking>,
     private readonly unitsService: UnitsService,
+    private readonly closedDaysService: ClosedDaysService,
   ) {}
 
   async create(
@@ -44,8 +36,12 @@ export class BookingsService {
       throw new BadRequestException('You must agree to the terms of service');
     }
 
-    // Closed on weekends / national holidays.
-    this.assertBookableDate(dto.installationDate);
+    // A customer whose mobile was blocked by customer service cannot rebook
+    // online — they must call in.
+    await this.assertNotBlocked(dto.mobile);
+
+    // Closed on weekends / national holidays / admin-declared closed days.
+    await this.assertBookableDate(dto.installationDate);
 
     const unitExists = await this.unitsService.existsActive(dto.unitCode);
     if (!unitExists) {
@@ -73,17 +69,35 @@ export class BookingsService {
     return this.bookingsRepo.save(booking);
   }
 
-  /** Reject weekend (Fri/Sat) and fixed national-holiday dates. */
-  private assertBookableDate(installationDate: string): void {
+  /**
+   * Reject weekends (Fri/Sat) and any day an admin has marked closed in the
+   * closed_days table. All holidays are admin-managed — none are hardcoded.
+   */
+  private async assertBookableDate(installationDate: string): Promise<void> {
     const weekday = new Date(`${installationDate}T00:00:00Z`).getUTCDay();
     if (weekday === 5 || weekday === 6) {
       throw new BadRequestException(
         'Installations are not available on Fridays or Saturdays (official holidays).',
       );
     }
-    if (FIXED_HOLIDAYS.has(installationDate.slice(5))) {
+    if (await this.closedDaysService.isClosed(installationDate)) {
       throw new BadRequestException(
-        'Installations are not available on official public holidays.',
+        'Installations are not available on this day — it is closed (holiday). ' +
+          'هذا اليوم مغلق (إجازة)، برجاء اختيار يوم آخر.',
+      );
+    }
+  }
+
+  /** Reject a booking from a mobile number an admin has blocked. */
+  private async assertNotBlocked(mobile: string): Promise<void> {
+    const blocked = await this.bookingsRepo.findOne({
+      where: { mobile, blocked: true },
+    });
+    if (blocked) {
+      throw new ForbiddenException(
+        'This mobile number is blocked from online booking. Please contact ' +
+          'customer service. هذا الرقم محظور من الحجز عبر الموقع، برجاء ' +
+          'التواصل مع خدمة العملاء.',
       );
     }
   }
@@ -125,7 +139,7 @@ export class BookingsService {
       throw new BadRequestException('Pick a different date or time to postpone.');
     }
 
-    this.assertBookableDate(dto.installationDate);
+    await this.assertBookableDate(dto.installationDate);
     await this.assertSlotFree(
       dto.installationDate,
       dto.installationTime,
@@ -198,6 +212,18 @@ export class BookingsService {
     const booking = await this.findOne(id);
     booking.status = status;
     return this.bookingsRepo.save(booking);
+  }
+
+  /**
+   * Block or unblock a customer from online booking. The flag is per mobile
+   * number, so it's applied to every booking that customer has made — keeping
+   * the dashboard consistent and the create() check reliable.
+   */
+  async setBlocked(id: string, blocked: boolean): Promise<Booking> {
+    const booking = await this.findOne(id);
+    await this.bookingsRepo.update({ mobile: booking.mobile }, { blocked });
+    booking.blocked = blocked;
+    return booking;
   }
 
   async remove(id: string): Promise<void> {
