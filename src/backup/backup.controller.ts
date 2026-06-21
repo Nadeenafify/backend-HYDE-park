@@ -35,10 +35,15 @@ export class BackupController {
     @CurrentUser() user: JwtUser,
   ) {
     const result = await this.backupService.restore(body);
+    const { units, bookings } = result;
     await this.logs.record({
       user,
       action: 'backup.restore',
-      description: `Restored ${result.units.created} units and ${result.bookings.created} bookings`,
+      description:
+        `Restored ${units.created} units and ${bookings.created} bookings` +
+        ` (skipped ${units.skipped + bookings.skipped}, ` +
+        `failed ${units.failed + bookings.failed}, ` +
+        `warnings ${bookings.warnings.length})`,
     });
     return result;
   }

@@ -4,6 +4,50 @@ import { Repository } from 'typeorm';
 import { Booking } from '../bookings/entities/booking.entity';
 import { Unit } from '../units/entities/unit.entity';
 
+/** A single thing the operator should know about one row of a restore. */
+export interface RestoreNote {
+  /** Human-readable identifier for the row (code, id, or name). */
+  ref: string;
+  reason: string;
+}
+
+/** Outcome of restoring one entity (units or bookings). */
+export interface RestoreEntityResult {
+  /** Rows newly inserted. */
+  created: number;
+  /** Rows already present (by id, or — for units — by unique code). */
+  skipped: number;
+  /** Rows that could not be inserted; see `errors` for why. */
+  failed: number;
+  /** Why each failed row failed. */
+  errors: RestoreNote[];
+  /** Rows inserted but with an integrity concern (e.g. dangling reference). */
+  warnings: RestoreNote[];
+}
+
+export interface RestoreResult {
+  units: RestoreEntityResult;
+  bookings: RestoreEntityResult;
+}
+
+const emptyEntityResult = (): RestoreEntityResult => ({
+  created: 0,
+  skipped: 0,
+  failed: 0,
+  errors: [],
+  warnings: [],
+});
+
+/** Turn a thrown insert error into a concise, loggable reason. */
+function reasonFrom(err: unknown): string {
+  if (err instanceof Error) {
+    // Postgres driver errors carry the useful specifics on `detail`.
+    const detail = (err as { detail?: string }).detail;
+    return detail ? `${err.message} (${detail})` : err.message;
+  }
+  return 'unknown error';
+}
+
 @Injectable()
 export class BackupService {
   constructor(
@@ -31,41 +75,74 @@ export class BackupService {
   /**
    * Additive restore: re-inserts records (by id) that are not already present.
    * Existing rows are kept untouched, so this never destroys current data.
+   *
+   * It respects the data's real constraints:
+   * - Units are de-duplicated by `id` AND by their UNIQUE `code`.
+   * - Per-row insert failures are captured with a reason instead of being
+   *   silently swallowed.
+   * - Bookings link to units by the denormalised `unitCode` string (no FK),
+   *   so an orphaned reference is allowed but reported as a warning.
    */
-  async restore(payload: { units?: unknown[]; bookings?: unknown[] }) {
-    const result = {
-      units: { created: 0, skipped: 0 },
-      bookings: { created: 0, skipped: 0 },
+  async restore(payload: {
+    units?: unknown[];
+    bookings?: unknown[];
+  }): Promise<RestoreResult> {
+    const result: RestoreResult = {
+      units: emptyEntityResult(),
+      bookings: emptyEntityResult(),
     };
 
+    // --- Units -------------------------------------------------------------
     const units = Array.isArray(payload?.units)
       ? (payload.units as Partial<Unit>[])
       : [];
-    const existingUnitIds = new Set(
-      (await this.units.find({ select: { id: true } })).map((u) => u.id),
-    );
+    const existingUnits = await this.units.find({
+      select: { id: true, code: true },
+    });
+    const existingUnitIds = new Set(existingUnits.map((u) => u.id));
+    // `code` carries a UNIQUE constraint and is how bookings reference units,
+    // so we track it for both de-duplication and the orphan check below.
+    const knownUnitCodes = new Set(existingUnits.map((u) => u.code));
+
     for (const u of units) {
-      if (!u?.id || existingUnitIds.has(u.id)) {
+      const ref = u?.code || u?.id || '(unknown unit)';
+      if (!u?.id) {
+        result.units.failed++;
+        result.units.errors.push({ ref, reason: 'missing id' });
+        continue;
+      }
+      if (existingUnitIds.has(u.id) || (u.code != null && knownUnitCodes.has(u.code))) {
         result.units.skipped++;
         continue;
       }
       try {
         await this.units.insert(u as Unit);
         existingUnitIds.add(u.id);
+        if (u.code != null) knownUnitCodes.add(u.code);
         result.units.created++;
-      } catch {
-        result.units.skipped++;
+      } catch (err) {
+        result.units.failed++;
+        result.units.errors.push({ ref, reason: reasonFrom(err) });
       }
     }
 
+    // --- Bookings ----------------------------------------------------------
     const bookings = Array.isArray(payload?.bookings)
       ? (payload.bookings as Partial<Booking>[])
       : [];
     const existingBookingIds = new Set(
       (await this.bookings.find({ select: { id: true } })).map((b) => b.id),
     );
+
     for (const b of bookings) {
-      if (!b?.id || existingBookingIds.has(b.id)) {
+      const ref =
+        b?.id || `${b?.firstName ?? ''} ${b?.lastName ?? ''}`.trim() || '(unknown booking)';
+      if (!b?.id) {
+        result.bookings.failed++;
+        result.bookings.errors.push({ ref, reason: 'missing id' });
+        continue;
+      }
+      if (existingBookingIds.has(b.id)) {
         result.bookings.skipped++;
         continue;
       }
@@ -73,8 +150,17 @@ export class BackupService {
         await this.bookings.insert(b as Booking);
         existingBookingIds.add(b.id);
         result.bookings.created++;
-      } catch {
-        result.bookings.skipped++;
+        // No FK backs `unitCode`, so a dangling reference can't be caught by
+        // the DB — surface it instead of letting it pass silently.
+        if (b.unitCode != null && !knownUnitCodes.has(b.unitCode)) {
+          result.bookings.warnings.push({
+            ref,
+            reason: `references unit "${b.unitCode}" which does not exist`,
+          });
+        }
+      } catch (err) {
+        result.bookings.failed++;
+        result.bookings.errors.push({ ref, reason: reasonFrom(err) });
       }
     }
 
