@@ -18,6 +18,9 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { PostponeBookingDto } from './dto/postpone-booking.dto';
 import { UnitsService } from '../units/units.service';
 import { ClosedDaysService } from '../closed-days/closed-days.service';
+import { Postpone } from '../postpones/entities/postpone.entity';
+import { BlockEvent } from '../block-events/entities/block-event.entity';
+import { JwtUser } from '../auth/current-user.decorator';
 
 @Injectable()
 export class BookingsService {
@@ -126,7 +129,11 @@ export class BookingsService {
    * Postpone a booking to a new date/time: validates the new slot, frees the
    * old one, records the move, and flags the booking as postponed.
    */
-  async postpone(id: string, dto: PostponeBookingDto): Promise<Booking> {
+  async postpone(
+    id: string,
+    dto: PostponeBookingDto,
+    actor?: JwtUser,
+  ): Promise<Booking> {
     const booking = await this.findOne(id);
 
     if (booking.status === BookingStatus.CANCELLED) {
@@ -165,7 +172,24 @@ export class BookingsService {
     booking.installationDate = dto.installationDate;
     booking.installationTime = dto.installationTime;
 
-    return this.bookingsRepo.save(booking);
+    // Persist the booking and its audit row together: either both land or
+    // neither does, so the postpones table can never drift from the booking.
+    return this.bookingsRepo.manager.transaction(async (em) => {
+      const saved = await em.save(booking);
+      await em.getRepository(Postpone).insert({
+        bookingId: booking.id,
+        unitCode: booking.unitCode,
+        fromDate: record.fromDate,
+        fromTime: record.fromTime,
+        toDate: record.toDate,
+        toTime: record.toTime,
+        sequence: booking.postponeCount,
+        actorId: actor?.sub ?? null,
+        actorName: actor?.name ?? null,
+        actorEmail: actor?.email ?? null,
+      });
+      return saved;
+    });
   }
 
   /**
@@ -219,11 +243,49 @@ export class BookingsService {
    * number, so it's applied to every booking that customer has made — keeping
    * the dashboard consistent and the create() check reliable.
    */
-  async setBlocked(id: string, blocked: boolean): Promise<Booking> {
+  async setBlocked(
+    id: string,
+    blocked: boolean,
+    actor?: JwtUser,
+  ): Promise<Booking> {
     const booking = await this.findOne(id);
-    await this.bookingsRepo.update({ mobile: booking.mobile }, { blocked });
+    const customerName =
+      `${booking.firstName} ${booking.lastName}`.trim() || null;
+
+    // Flip the flag on every booking for this mobile and record the audit row
+    // together, so the block_events history can't drift from the live state.
+    await this.bookingsRepo.manager.transaction(async (em) => {
+      await em.update(Booking, { mobile: booking.mobile }, { blocked });
+      await em.getRepository(BlockEvent).insert({
+        mobile: booking.mobile,
+        customerName,
+        blocked,
+        actorId: actor?.sub ?? null,
+        actorName: actor?.name ?? null,
+        actorEmail: actor?.email ?? null,
+      });
+    });
+
     booking.blocked = blocked;
     return booking;
+  }
+
+  /**
+   * Block/unblock a customer by mobile number — used by the Blocked admin view,
+   * where actions are keyed by mobile rather than a specific booking. Resolves
+   * any booking for that mobile, then reuses setBlocked (which fans the flag out
+   * across every booking for the number and writes the audit row).
+   */
+  async setBlockedByMobile(
+    mobile: string,
+    blocked: boolean,
+    actor?: JwtUser,
+  ): Promise<Booking> {
+    const booking = await this.bookingsRepo.findOne({ where: { mobile } });
+    if (!booking) {
+      throw new NotFoundException(`No booking found for mobile ${mobile}`);
+    }
+    return this.setBlocked(booking.id, blocked, actor);
   }
 
   async remove(id: string): Promise<void> {

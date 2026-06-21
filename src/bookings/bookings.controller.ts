@@ -18,6 +18,7 @@ import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { UpdateBlockedDto } from './dto/update-blocked.dto';
+import { SetBlockedByMobileDto } from './dto/set-blocked-by-mobile.dto';
 import { PostponeBookingDto } from './dto/postpone-booking.dto';
 import { BookingStatus } from './entities/booking.entity';
 import { receiptMulterOptions } from './multer.config';
@@ -90,6 +91,27 @@ export class BookingsController {
     return booking;
   }
 
+  /** PATCH /api/bookings/blocked-by-mobile — block/unblock a customer by number. */
+  @Patch('blocked-by-mobile')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.MANAGER, UserRole.SUPER_ADMIN)
+  async setBlockedByMobile(
+    @Body() dto: SetBlockedByMobileDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    const booking = await this.bookingsService.setBlockedByMobile(
+      dto.mobile,
+      dto.blocked,
+      user,
+    );
+    await this.logs.record({
+      user,
+      action: 'booking.blocked',
+      description: `${dto.blocked ? 'Blocked' : 'Unblocked'} customer ${dto.mobile}`,
+    });
+    return booking;
+  }
+
   /** PATCH /api/bookings/:id/blocked — block/unblock a customer from booking online. */
   @Patch(':id/blocked')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -99,7 +121,7 @@ export class BookingsController {
     @Body() dto: UpdateBlockedDto,
     @CurrentUser() user: JwtUser,
   ) {
-    const booking = await this.bookingsService.setBlocked(id, dto.blocked);
+    const booking = await this.bookingsService.setBlocked(id, dto.blocked, user);
     await this.logs.record({
       user,
       action: 'booking.blocked',
@@ -117,7 +139,7 @@ export class BookingsController {
     @Body() dto: PostponeBookingDto,
     @CurrentUser() user: JwtUser,
   ) {
-    const booking = await this.bookingsService.postpone(id, dto);
+    const booking = await this.bookingsService.postpone(id, dto, user);
     await this.logs.record({
       user,
       action: 'booking.postpone',
