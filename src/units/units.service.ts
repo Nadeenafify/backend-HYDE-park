@@ -78,21 +78,33 @@ export class UnitsService implements OnModuleInit {
       (c) => !existingSet.has(c.code.toLowerCase()),
     );
 
+    let created = toInsert.length;
     if (toInsert.length) {
-      await this.unitsRepo.save(
-        toInsert.map((c) =>
-          this.unitsRepo.create({
+      // INSERT ... ON CONFLICT DO NOTHING — the app-level filter above handles
+      // the common case, but `.orIgnore()` makes us race-safe: if a concurrent
+      // import inserts the same code between our read and write, the unique
+      // index on `code` would otherwise throw and fail the whole batch. Here
+      // the DB silently skips the conflicting row instead, and `raw` reports
+      // only the rows actually inserted so our counts stay accurate.
+      const result = await this.unitsRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Unit)
+        .values(
+          toInsert.map((c) => ({
             code: c.code,
             description: c.description,
             isActive: true,
-          }),
-        ),
-      );
+          })),
+        )
+        .orIgnore()
+        .execute();
+      created = Array.isArray(result.raw) ? result.raw.length : toInsert.length;
     }
 
     return {
-      created: toInsert.length,
-      skipped: total - toInsert.length,
+      created,
+      skipped: total - created,
       total,
     };
   }
