@@ -6,6 +6,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { MulterExceptionFilter } from './common/multer-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -17,14 +18,19 @@ async function bootstrap() {
   // All routes are served under /api (matches the frontend Vite proxy).
   app.setGlobalPrefix('api');
 
-  // Validate and transform all incoming request payloads.
+  // Validate and transform all incoming request payloads. forbidNonWhitelisted
+  // rejects unexpected fields with a 400 instead of silently stripping them.
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
+      forbidNonWhitelisted: true,
       transform: true,
       transformOptions: { enableImplicitConversion: true },
     }),
   );
+
+  // Map multer upload-limit errors (oversize / too many files) to proper 4xx.
+  app.useGlobalFilters(new MulterExceptionFilter());
 
   // Allow the frontend dev server to call the API directly (without the proxy).
   const corsOrigin = config.get<string>('CORS_ORIGIN', 'http://localhost:5173');

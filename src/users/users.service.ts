@@ -23,12 +23,25 @@ export class UsersService implements OnModuleInit {
   /** Seed the first Super Admin (from ADMIN_USERNAME/PASSWORD) if none exist. */
   async onModuleInit(): Promise<void> {
     if ((await this.repo.count()) > 0) return;
-    const email = (
-      this.config.get<string>('ADMIN_USERNAME') || 'admin@gmail.com'
-    )
-      .trim()
-      .toLowerCase();
-    const password = this.config.get<string>('ADMIN_PASSWORD') || 'admin123';
+    const rawEmail = this.config.get<string>('ADMIN_USERNAME');
+    const rawPassword = this.config.get<string>('ADMIN_PASSWORD');
+    const isProd = this.config.get<string>('NODE_ENV') === 'production';
+    const weak = !rawPassword || rawPassword === 'admin123';
+    if (isProd && weak) {
+      // Never seed a publicly-known credential pair on the highest-privilege
+      // account in production — fail fast like the JWT_SECRET guard.
+      throw new Error(
+        'Refusing to seed a default admin in production. Set ADMIN_USERNAME and a strong ADMIN_PASSWORD.',
+      );
+    }
+    const email = (rawEmail || 'admin@gmail.com').trim().toLowerCase();
+    const password = rawPassword || 'admin123';
+    if (weak) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '⚠️  Seeding a default admin with a weak/default password. Set ADMIN_PASSWORD before deploying.',
+      );
+    }
     await this.repo.save(
       this.repo.create({
         name: 'Super Admin',

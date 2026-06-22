@@ -22,6 +22,26 @@ import { Postpone } from '../postpones/entities/postpone.entity';
 import { BlockEvent } from '../block-events/entities/block-event.entity';
 import { JwtUser } from '../auth/current-user.decorator';
 
+const SLOT_TAKEN_MESSAGE =
+  'This installation date and time is already booked. Please choose another slot.';
+
+/** Postgres unique-violation detector — the race-safe slot-conflict backstop. */
+function isUniqueViolation(e: unknown): boolean {
+  const err = e as { code?: string; driverError?: { code?: string } };
+  return err?.code === '23505' || err?.driverError?.code === '23505';
+}
+
+/** Minutes since midnight for a slot label like "1:00 PM" (null if unparseable). */
+function slotStartMinutes(slot: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(slot.trim());
+  if (!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h === 12) h = 0;
+  if (m[3].toUpperCase() === 'PM') h += 12;
+  return h * 60 + min;
+}
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -45,18 +65,22 @@ export class BookingsService {
 
     // Closed on weekends / national holidays / admin-declared closed days.
     await this.assertBookableDate(dto.installationDate);
+    // No booking a date that has passed, or a time slot that's already over today.
+    this.assertNotPast(dto.installationDate, dto.installationTime);
 
-    const unitExists = await this.unitsService.existsActive(dto.unitCode);
+    // Unit codes are stored canonically uppercase, so normalize before lookup.
+    const unitCode = dto.unitCode.trim().toUpperCase();
+    const unitExists = await this.unitsService.existsActive(unitCode);
     if (!unitExists) {
-      throw new BadRequestException(`Unknown unit "${dto.unitCode}"`);
+      throw new BadRequestException(`Unknown unit "${unitCode}"`);
     }
 
     // Each installation slot (date + time) can be booked only once. A cancelled
-    // booking frees the slot again.
+    // booking frees the slot again. (DB unique index is the race-safe backstop.)
     await this.assertSlotFree(dto.installationDate, dto.installationTime);
 
     const booking = this.bookingsRepo.create({
-      unitCode: dto.unitCode,
+      unitCode,
       firstName: dto.firstName,
       lastName: dto.lastName,
       mobile: dto.mobile,
@@ -69,7 +93,14 @@ export class BookingsService {
       receiptPath: receipt ? `/uploads/${receipt.filename}` : null,
     });
 
-    return this.bookingsRepo.save(booking);
+    try {
+      return await this.bookingsRepo.save(booking);
+    } catch (e) {
+      // Two requests passed assertSlotFree and raced to insert — the DB unique
+      // index rejects the loser; surface it as a clean 409.
+      if (isUniqueViolation(e)) throw new ConflictException(SLOT_TAKEN_MESSAGE);
+      throw e;
+    }
   }
 
   /**
@@ -88,6 +119,35 @@ export class BookingsService {
         'Installations are not available on this day — it is closed (holiday). ' +
           'هذا اليوم مغلق (إجازة)، برجاء اختيار يوم آخر.',
       );
+    }
+  }
+
+  /**
+   * Reject a date that has already passed, and — for today — a time slot whose
+   * start has already gone by. Uses Africa/Cairo wall-clock so it matches the
+   * customer-facing calendar no matter what timezone the server runs in.
+   */
+  private assertNotPast(installationDate: string, installationTime: string): void {
+    const cairoNow = new Date(
+      new Date().toLocaleString('en-US', { timeZone: 'Africa/Cairo' }),
+    );
+    const cairoToday = `${cairoNow.getFullYear()}-${String(
+      cairoNow.getMonth() + 1,
+    ).padStart(2, '0')}-${String(cairoNow.getDate()).padStart(2, '0')}`;
+    if (installationDate < cairoToday) {
+      throw new BadRequestException(
+        'Cannot book a date in the past. لا يمكن الحجز في تاريخ مضى.',
+      );
+    }
+    if (installationDate === cairoToday) {
+      const slot = slotStartMinutes(installationTime);
+      const nowMinutes = cairoNow.getHours() * 60 + cairoNow.getMinutes();
+      if (slot !== null && slot <= nowMinutes) {
+        throw new BadRequestException(
+          'This time slot has already passed for today. ' +
+            'هذا الموعد قد فات لليوم، برجاء اختيار موعد آخر.',
+        );
+      }
     }
   }
 
@@ -119,9 +179,7 @@ export class BookingsService {
       },
     });
     if (existing && existing.id !== excludeId) {
-      throw new ConflictException(
-        'This installation date and time is already booked. Please choose another slot.',
-      );
+      throw new ConflictException(SLOT_TAKEN_MESSAGE);
     }
   }
 
@@ -147,6 +205,7 @@ export class BookingsService {
     }
 
     await this.assertBookableDate(dto.installationDate);
+    this.assertNotPast(dto.installationDate, dto.installationTime);
     await this.assertSlotFree(
       dto.installationDate,
       dto.installationTime,
@@ -174,22 +233,28 @@ export class BookingsService {
 
     // Persist the booking and its audit row together: either both land or
     // neither does, so the postpones table can never drift from the booking.
-    return this.bookingsRepo.manager.transaction(async (em) => {
-      const saved = await em.save(booking);
-      await em.getRepository(Postpone).insert({
-        bookingId: booking.id,
-        unitCode: booking.unitCode,
-        fromDate: record.fromDate,
-        fromTime: record.fromTime,
-        toDate: record.toDate,
-        toTime: record.toTime,
-        sequence: booking.postponeCount,
-        actorId: actor?.sub ?? null,
-        actorName: actor?.name ?? null,
-        actorEmail: actor?.email ?? null,
+    try {
+      return await this.bookingsRepo.manager.transaction(async (em) => {
+        const saved = await em.save(booking);
+        await em.getRepository(Postpone).insert({
+          bookingId: booking.id,
+          unitCode: booking.unitCode,
+          fromDate: record.fromDate,
+          fromTime: record.fromTime,
+          toDate: record.toDate,
+          toTime: record.toTime,
+          sequence: booking.postponeCount,
+          actorId: actor?.sub ?? null,
+          actorName: actor?.name ?? null,
+          actorEmail: actor?.email ?? null,
+        });
+        return saved;
       });
-      return saved;
-    });
+    } catch (e) {
+      // Lost a race to the new slot — the DB unique index rejected it.
+      if (isUniqueViolation(e)) throw new ConflictException(SLOT_TAKEN_MESSAGE);
+      throw e;
+    }
   }
 
   /**

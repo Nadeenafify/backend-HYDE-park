@@ -23,6 +23,13 @@ export interface PostponeRecord {
   at: string;
 }
 
+// DB-level guarantee that a date+time slot can hold at most one active
+// (non-cancelled) booking — the race-safe backstop behind the app's slot check.
+// Partial unique index so cancelled bookings free the slot for rebooking.
+@Index('uq_booking_active_slot', ['installationDate', 'installationTime'], {
+  unique: true,
+  where: `status <> 'cancelled'`,
+})
 @Entity({ name: 'bookings' })
 export class Booking {
   @PrimaryGeneratedColumn('uuid')

@@ -5,7 +5,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
 
-/** Audit/reporting feed of block & unblock actions. Manager or super admin. */
+/** Audit/reporting feed of block & unblock actions. Manager or super admin —
+ * matches the dashboard, which shows the Blocked view to booking managers. */
 @Controller('block-events')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.MANAGER, UserRole.SUPER_ADMIN)

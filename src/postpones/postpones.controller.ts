@@ -5,7 +5,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
 
-/** Audit/reporting feed of postpones. Manager or super admin only. */
+/** Audit/reporting feed of postpones. Manager or super admin — matches the
+ * dashboard, which shows the Postpones view to anyone who can manage bookings. */
 @Controller('postpones')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.MANAGER, UserRole.SUPER_ADMIN)

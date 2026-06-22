@@ -18,16 +18,40 @@ export class UnitsService implements OnModuleInit {
     private readonly unitsRepo: Repository<Unit>,
   ) {}
 
-  /** Seed the default units once, on first startup, if the table is empty. */
+  /** Normalize legacy codes to canonical uppercase, then seed defaults if empty. */
   async onModuleInit(): Promise<void> {
+    await this.normalizeExistingCodes();
     const count = await this.unitsRepo.count();
     if (count === 0) {
       const units = DEFAULT_UNITS.map((code) =>
-        this.unitsRepo.create({ code, isActive: true }),
+        this.unitsRepo.create({ code: code.toUpperCase(), isActive: true }),
       );
       await this.unitsRepo.save(units);
       // eslint-disable-next-line no-console
       console.log(`🌱 Seeded ${units.length} units.`);
+    }
+  }
+
+  /**
+   * One-time migration: bring any mixed-case legacy code to the canonical
+   * uppercase form so the whole table shares one format. Skips a row whose
+   * uppercased code would collide with another existing code (avoids a unique
+   * violation) and leaves it as-is.
+   */
+  private async normalizeExistingCodes(): Promise<void> {
+    const all = await this.unitsRepo.find();
+    for (const u of all) {
+      const upper = u.code.toUpperCase();
+      if (u.code === upper) continue;
+      if (all.some((o) => o.id !== u.id && o.code === upper)) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `⚠️  Unit "${u.code}" not uppercased — "${upper}" already exists.`,
+        );
+        continue;
+      }
+      u.code = upper;
+      await this.unitsRepo.save(u);
     }
   }
 
@@ -39,13 +63,14 @@ export class UnitsService implements OnModuleInit {
   }
 
   async create(dto: CreateUnitDto): Promise<Unit> {
-    const existing = await this.unitsRepo.findOne({
-      where: { code: dto.code },
-    });
+    // Store codes in one canonical format (uppercase) so "a-101" and "A-101"
+    // can never coexist and lookups always match.
+    const code = dto.code.trim().toUpperCase();
+    const existing = await this.unitsRepo.findOne({ where: { code } });
     if (existing) {
-      throw new ConflictException(`Unit "${dto.code}" already exists`);
+      throw new ConflictException(`Unit "${code}" already exists`);
     }
-    const unit = this.unitsRepo.create(dto);
+    const unit = this.unitsRepo.create({ ...dto, code });
     return this.unitsRepo.save(unit);
   }
 
@@ -58,25 +83,22 @@ export class UnitsService implements OnModuleInit {
   ): Promise<{ created: number; skipped: number; total: number }> {
     const total = rows.length;
 
-    // Normalize + dedupe within the uploaded file.
+    // Normalize to canonical uppercase + dedupe within the uploaded file.
     const seen = new Set<string>();
     const cleaned: { code: string; description: string | null }[] = [];
     for (const r of rows) {
-      const code = String(r.code ?? '').trim();
+      const code = String(r.code ?? '').trim().toUpperCase();
       if (!code) continue;
-      const key = code.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(code)) continue;
+      seen.add(code);
       const description = (r.description ?? '').toString().trim();
       cleaned.push({ code, description: description || null });
     }
 
     // Skip codes that already exist in the table.
     const existing = await this.unitsRepo.find({ select: { code: true } });
-    const existingSet = new Set(existing.map((e) => e.code.toLowerCase()));
-    const toInsert = cleaned.filter(
-      (c) => !existingSet.has(c.code.toLowerCase()),
-    );
+    const existingSet = new Set(existing.map((e) => e.code.toUpperCase()));
+    const toInsert = cleaned.filter((c) => !existingSet.has(c.code));
 
     let created = toInsert.length;
     if (toInsert.length) {
@@ -112,7 +134,7 @@ export class UnitsService implements OnModuleInit {
   /** True if a unit with the given code exists and is active. */
   async existsActive(code: string): Promise<boolean> {
     const count = await this.unitsRepo.count({
-      where: { code, isActive: true },
+      where: { code: code.trim().toUpperCase(), isActive: true },
     });
     return count > 0;
   }

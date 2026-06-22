@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { plainToInstance, ClassConstructor } from 'class-transformer';
+import { validateSync, ValidationError } from 'class-validator';
 import { Booking } from '../bookings/entities/booking.entity';
 import { Unit } from '../units/entities/unit.entity';
+import { RestoreBookingDto, RestoreUnitDto } from './dto/restore.dto';
 
 /** A single thing the operator should know about one row of a restore. */
 export interface RestoreNote {
@@ -46,6 +49,43 @@ function reasonFrom(err: unknown): string {
     return detail ? `${err.message} (${detail})` : err.message;
   }
   return 'unknown error';
+}
+
+/** Flatten a class-validator error tree into a single readable reason. */
+function describeValidationErrors(errors: ValidationError[]): string {
+  const messages: string[] = [];
+  const walk = (errs: ValidationError[]) => {
+    for (const e of errs) {
+      if (e.constraints) messages.push(...Object.values(e.constraints));
+      if (e.children?.length) walk(e.children);
+    }
+  };
+  walk(errors);
+  return messages.length ? messages.join('; ') : 'invalid row';
+}
+
+/**
+ * Validate one untrusted restore row against its DTO. On success returns the
+ * sanitised instance (extra/undeclared properties stripped via `whitelist`); on
+ * failure returns a human-readable reason so the row can be reported, never
+ * inserted. This is the gate that stops raw JSON reaching the database.
+ */
+function validateRow<T extends object>(
+  cls: ClassConstructor<T>,
+  raw: unknown,
+): { ok: true; value: T } | { ok: false; reason: string } {
+  if (raw === null || typeof raw !== 'object') {
+    return { ok: false, reason: 'not an object' };
+  }
+  const instance = plainToInstance(cls, raw);
+  const errors = validateSync(instance, {
+    whitelist: true,
+    forbidUnknownValues: true,
+  });
+  if (errors.length) {
+    return { ok: false, reason: describeValidationErrors(errors) };
+  }
+  return { ok: true, value: instance };
 }
 
 @Injectable()
@@ -104,9 +144,19 @@ export class BackupService {
     // so we track it for both de-duplication and the orphan check below.
     const knownUnitCodes = new Set(existingUnits.map((u) => u.code));
 
-    for (const u of units) {
-      const ref = u?.code || u?.id || '(unknown unit)';
-      if (!u?.id) {
+    for (const raw of units) {
+      const r = raw as Partial<Unit> | null;
+      const ref = r?.code || r?.id || '(unknown unit)';
+      // Validate the untrusted row before anything else — only well-formed,
+      // sanitised data is allowed past this point.
+      const checked = validateRow(RestoreUnitDto, raw);
+      if (!checked.ok) {
+        result.units.failed++;
+        result.units.errors.push({ ref, reason: checked.reason });
+        continue;
+      }
+      const u = checked.value;
+      if (!u.id) {
         result.units.failed++;
         result.units.errors.push({ ref, reason: 'missing id' });
         continue;
@@ -116,7 +166,8 @@ export class BackupService {
         continue;
       }
       try {
-        await this.units.insert(u as Unit);
+        // Date columns arrive as ISO strings from JSON; TypeORM coerces them.
+        await this.units.insert(u as unknown as Unit);
         existingUnitIds.add(u.id);
         if (u.code != null) knownUnitCodes.add(u.code);
         result.units.created++;
@@ -134,10 +185,18 @@ export class BackupService {
       (await this.bookings.find({ select: { id: true } })).map((b) => b.id),
     );
 
-    for (const b of bookings) {
+    for (const raw of bookings) {
+      const r = raw as Partial<Booking> | null;
       const ref =
-        b?.id || `${b?.firstName ?? ''} ${b?.lastName ?? ''}`.trim() || '(unknown booking)';
-      if (!b?.id) {
+        r?.id || `${r?.firstName ?? ''} ${r?.lastName ?? ''}`.trim() || '(unknown booking)';
+      const checked = validateRow(RestoreBookingDto, raw);
+      if (!checked.ok) {
+        result.bookings.failed++;
+        result.bookings.errors.push({ ref, reason: checked.reason });
+        continue;
+      }
+      const b = checked.value;
+      if (!b.id) {
         result.bookings.failed++;
         result.bookings.errors.push({ ref, reason: 'missing id' });
         continue;
@@ -147,7 +206,8 @@ export class BackupService {
         continue;
       }
       try {
-        await this.bookings.insert(b as Booking);
+        // Date columns arrive as ISO strings from JSON; TypeORM coerces them.
+        await this.bookings.insert(b as unknown as Booking);
         existingBookingIds.add(b.id);
         result.bookings.created++;
         // No FK backs `unitCode`, so a dangling reference can't be caught by
