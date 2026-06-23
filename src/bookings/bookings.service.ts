@@ -17,7 +17,7 @@ import {
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { PostponeBookingDto } from './dto/postpone-booking.dto';
 import { UnitsService } from '../units/units.service';
-import { ClosedDaysService } from '../closed-days/closed-days.service';
+import { ScheduleService } from '../schedule/schedule.service';
 import { Postpone } from '../postpones/entities/postpone.entity';
 import { BlockEvent } from '../block-events/entities/block-event.entity';
 import { JwtUser } from '../auth/current-user.decorator';
@@ -48,7 +48,7 @@ export class BookingsService {
     @InjectRepository(Booking)
     private readonly bookingsRepo: Repository<Booking>,
     private readonly unitsService: UnitsService,
-    private readonly closedDaysService: ClosedDaysService,
+    private readonly scheduleService: ScheduleService,
   ) {}
 
   async create(
@@ -63,8 +63,8 @@ export class BookingsService {
     // online — they must call in.
     await this.assertNotBlocked(dto.mobile);
 
-    // Closed on weekends / national holidays / admin-declared closed days.
-    await this.assertBookableDate(dto.installationDate);
+    // Must be a working day and an available time slot (admin-configured schedule).
+    await this.assertBookable(dto.installationDate, dto.installationTime);
     // No booking a date that has passed, or a time slot that's already over today.
     this.assertNotPast(dto.installationDate, dto.installationTime);
 
@@ -81,6 +81,7 @@ export class BookingsService {
 
     const booking = this.bookingsRepo.create({
       unitCode,
+      unitType: dto.unitType,
       firstName: dto.firstName,
       lastName: dto.lastName,
       mobile: dto.mobile,
@@ -104,20 +105,24 @@ export class BookingsService {
   }
 
   /**
-   * Reject weekends (Fri/Sat) and any day an admin has marked closed in the
-   * closed_days table. All holidays are admin-managed — none are hardcoded.
+   * Reject a day that isn't a working day, and a time that isn't one of that
+   * day's bookable slots — both driven by the admin-configured schedule.
    */
-  private async assertBookableDate(installationDate: string): Promise<void> {
-    const weekday = new Date(`${installationDate}T00:00:00Z`).getUTCDay();
-    if (weekday === 5 || weekday === 6) {
+  private async assertBookable(
+    installationDate: string,
+    installationTime: string,
+  ): Promise<void> {
+    const slots = await this.scheduleService.slotsForDate(installationDate);
+    if (slots.length === 0) {
       throw new BadRequestException(
-        'Installations are not available on Fridays or Saturdays (official holidays).',
+        'Installations are not available on this day. ' +
+          'التركيب غير متاح في هذا اليوم، برجاء اختيار يوم آخر.',
       );
     }
-    if (await this.closedDaysService.isClosed(installationDate)) {
+    if (!slots.includes(installationTime)) {
       throw new BadRequestException(
-        'Installations are not available on this day — it is closed (holiday). ' +
-          'هذا اليوم مغلق (إجازة)، برجاء اختيار يوم آخر.',
+        'This installation time is not available. ' +
+          'هذا الموعد غير متاح، برجاء اختيار موعد آخر.',
       );
     }
   }
@@ -204,7 +209,7 @@ export class BookingsService {
       throw new BadRequestException('Pick a different date or time to postpone.');
     }
 
-    await this.assertBookableDate(dto.installationDate);
+    await this.assertBookable(dto.installationDate, dto.installationTime);
     this.assertNotPast(dto.installationDate, dto.installationTime);
     await this.assertSlotFree(
       dto.installationDate,

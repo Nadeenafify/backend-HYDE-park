@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Unit } from './entities/unit.entity';
+import { Unit, UnitType } from './entities/unit.entity';
 import { CreateUnitDto } from './dto/create-unit.dto';
 
 @Injectable()
@@ -67,20 +67,26 @@ export class UnitsService implements OnModuleInit {
    * incoming rows, skips any code that already exists, and inserts the rest.
    */
   async createMany(
-    rows: { code: string; description?: string | null }[],
+    rows: { code: string; description?: string | null; type?: UnitType }[],
   ): Promise<{ created: number; skipped: number; total: number }> {
     const total = rows.length;
 
     // Normalize to canonical uppercase + dedupe within the uploaded file.
     const seen = new Set<string>();
-    const cleaned: { code: string; description: string | null }[] = [];
+    const cleaned: { code: string; description: string | null; type: UnitType }[] =
+      [];
     for (const r of rows) {
       const code = String(r.code ?? '').trim().toUpperCase();
       if (!code) continue;
       if (seen.has(code)) continue;
       seen.add(code);
       const description = (r.description ?? '').toString().trim();
-      cleaned.push({ code, description: description || null });
+      // Anything other than an explicit "commercial" defaults to residential.
+      const type =
+        r.type === UnitType.COMMERCIAL
+          ? UnitType.COMMERCIAL
+          : UnitType.RESIDENTIAL;
+      cleaned.push({ code, description: description || null, type });
     }
 
     // Skip codes that already exist in the table.
@@ -104,6 +110,7 @@ export class UnitsService implements OnModuleInit {
           toInsert.map((c) => ({
             code: c.code,
             description: c.description,
+            type: c.type,
             isActive: true,
           })),
         )

@@ -8,7 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { UnitsModule } from './units/units.module';
-import { ClosedDaysModule } from './closed-days/closed-days.module';
+import { ScheduleModule } from './schedule/schedule.module';
 import { PostponesModule } from './postpones/postpones.module';
 import { BlockEventsModule } from './block-events/block-events.module';
 import { BackupModule } from './backup/backup.module';
@@ -28,7 +28,7 @@ import { HealthController } from './health/health.controller';
     AuthModule,
     UsersModule,
     UnitsModule,
-    ClosedDaysModule,
+    ScheduleModule,
     PostponesModule,
     BlockEventsModule,
     BookingsModule,
