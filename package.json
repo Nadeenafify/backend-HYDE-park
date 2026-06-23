@@ -1,7 +1,7 @@
 {
   "name": "hpd-booking-backend",
   "version": "0.0.1",
-  "description": "NestJS + PostgreSQL API for the Hyde Park HPD Home Connect booking app",
+  "description": "NestJS + PostgreSQL API for the Hyde Park HPD Triple Play booking app",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {

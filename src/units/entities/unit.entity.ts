@@ -6,12 +6,6 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
-/** A unit is either a commercial or a residential property. */
-export enum UnitType {
-  COMMERCIAL = 'commercial',
-  RESIDENTIAL = 'residential',
-}
-
 @Entity({ name: 'units' })
 export class Unit {
   @PrimaryGeneratedColumn('uuid')
@@ -21,10 +15,6 @@ export class Unit {
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 50 })
   code: string;
-
-  /** Commercial or residential — drives the category picker in the booking form. */
-  @Column({ type: 'enum', enum: UnitType, default: UnitType.RESIDENTIAL })
-  type: UnitType;
 
   @Column({ type: 'varchar', length: 120, nullable: true })
   description: string | null;

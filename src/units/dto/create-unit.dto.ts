@@ -1,13 +1,9 @@
-import { IsBoolean, IsEnum, IsOptional, IsString, Length } from 'class-validator';
-import { UnitType } from '../entities/unit.entity';
+import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
 
 export class CreateUnitDto {
   @IsString()
   @Length(1, 50)
   code: string;
-
-  @IsEnum(UnitType)
-  type: UnitType;
 
   @IsOptional()
   @IsString()

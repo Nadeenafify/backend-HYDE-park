@@ -81,7 +81,6 @@ export class BookingsService {
 
     const booking = this.bookingsRepo.create({
       unitCode,
-      unitType: dto.unitType,
       firstName: dto.firstName,
       lastName: dto.lastName,
       mobile: dto.mobile,

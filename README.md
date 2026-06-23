@@ -1,6 +1,6 @@
 # HPD Booking — Backend (NestJS + PostgreSQL)
 
-REST API for the Hyde Park HPD Home Connect booking form.
+REST API for the Hyde Park HPD Triple Play booking form.
 Built with [NestJS](https://nestjs.com), [TypeORM](https://typeorm.io) and PostgreSQL.
 
 ## Prerequisites

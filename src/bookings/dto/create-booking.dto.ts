@@ -2,13 +2,11 @@ import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
-  IsEnum,
   IsNotEmpty,
   IsString,
   Length,
   Matches,
 } from 'class-validator';
-import { UnitType } from '../../units/entities/unit.entity';
 
 /**
  * Fields arrive as multipart/form-data, so everything is a string on the wire.
@@ -20,9 +18,6 @@ export class CreateBookingDto {
   @IsNotEmpty({ message: 'Unit is required' })
   unitCode: string;
 
-  @IsEnum(UnitType, { message: 'Unit type must be commercial or residential' })
-  unitType: UnitType;
-
   @IsString()
   @IsNotEmpty({ message: 'First name is required' })
   @Length(1, 80)
@@ -33,7 +28,7 @@ export class CreateBookingDto {
   @Length(1, 80)
   lastName: string;
 
-  @Matches(/^[0-9]{8,15}$/, { message: 'Mobile must be 8–15 digits' })
+  @Matches(/^[0-9]{11}$/, { message: 'Mobile must be exactly 11 digits' })
   mobile: string;
 
   @IsDateString(

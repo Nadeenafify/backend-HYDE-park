@@ -6,7 +6,6 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { UnitType } from '../../units/entities/unit.entity';
 
 export enum BookingStatus {
   PENDING = 'pending',
@@ -40,10 +39,6 @@ export class Booking {
   @Index()
   @Column({ type: 'varchar', length: 50 })
   unitCode: string;
-
-  /** Snapshot of the unit's category (commercial/residential) at booking time. */
-  @Column({ type: 'enum', enum: UnitType, nullable: true })
-  unitType: UnitType | null;
 
   @Column({ type: 'varchar', length: 80 })
   firstName: string;
