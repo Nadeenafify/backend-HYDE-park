@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Unit } from './entities/unit.entity';
@@ -117,6 +122,20 @@ export class UnitsService implements OnModuleInit {
       skipped: total - created,
       total,
     };
+  }
+
+  /**
+   * Permanently remove a unit by id. Bookings store the unit code as a plain
+   * string (no FK), so deleting a unit never corrupts existing bookings — it
+   * just drops the code from the registered list and the public form.
+   */
+  async remove(id: string): Promise<Unit> {
+    const unit = await this.unitsRepo.findOne({ where: { id } });
+    if (!unit) {
+      throw new NotFoundException('Unit not found');
+    }
+    await this.unitsRepo.remove(unit);
+    return unit;
   }
 
   /** True if a unit with the given code exists and is active. */

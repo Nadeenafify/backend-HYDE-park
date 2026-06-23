@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { UnitsService } from './units.service';
 import { CreateUnitDto } from './dto/create-unit.dto';
 import { BulkCreateUnitsDto } from './dto/bulk-create-units.dto';
@@ -48,5 +56,19 @@ export class UnitsController {
       description: `Imported ${result.created} units (skipped ${result.skipped})`,
     });
     return result;
+  }
+
+  /** DELETE /api/units/:id — super admin only: permanently remove a unit. */
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  async remove(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    const unit = await this.unitsService.remove(id);
+    await this.logs.record({
+      user,
+      action: 'unit.delete',
+      description: `Deleted unit ${unit.code}`,
+    });
+    return { success: true };
   }
 }
