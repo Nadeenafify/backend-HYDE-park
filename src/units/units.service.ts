@@ -4,13 +4,6 @@ import { Repository } from 'typeorm';
 import { Unit } from './entities/unit.entity';
 import { CreateUnitDto } from './dto/create-unit.dto';
 
-// Seed data mirrors the UNIT_OPTIONS list used by the frontend dropdown.
-const DEFAULT_UNITS = [
-  'A-101', 'A-102', 'A-201', 'A-202',
-  'B-101', 'B-102', 'B-201', 'B-202',
-  'Villa-01', 'Villa-02', 'Villa-03',
-];
-
 @Injectable()
 export class UnitsService implements OnModuleInit {
   constructor(
@@ -18,18 +11,13 @@ export class UnitsService implements OnModuleInit {
     private readonly unitsRepo: Repository<Unit>,
   ) {}
 
-  /** Normalize legacy codes to canonical uppercase, then seed defaults if empty. */
+  /**
+   * Normalize legacy codes to canonical uppercase on startup. Units are NOT
+   * seeded — the list is entirely admin-managed, so an empty table simply means
+   * no units have been added yet (the form then shows an empty state).
+   */
   async onModuleInit(): Promise<void> {
     await this.normalizeExistingCodes();
-    const count = await this.unitsRepo.count();
-    if (count === 0) {
-      const units = DEFAULT_UNITS.map((code) =>
-        this.unitsRepo.create({ code: code.toUpperCase(), isActive: true }),
-      );
-      await this.unitsRepo.save(units);
-      // eslint-disable-next-line no-console
-      console.log(`🌱 Seeded ${units.length} units.`);
-    }
   }
 
   /**
